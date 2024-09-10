@@ -1,0 +1,129 @@
+# HW1
+
+Author: Ruixuan Deng
+
+Date: 09/09/2024
+
+## Problem 1 - Wine Data
+
+### a.
+
+We first load the data
+
+```{r}
+wine_data <- read.csv("wine.data", header = FALSE)
+colnames(wine_data) <- c("Class", "Alcohol", "Malic_Acid", "Ash", "Alcalinity_of_Ash", 
+                         "Magnesium", "Total_Phenols", "Flavanoids", "Nonflavanoid_Phenols", 
+                         "Proanthocyanins", "Color_Intensity", "Hue", 
+                         "OD280/OD315_of_Diluted_Wines", "Proline")
+head(wine_data)
+```
+
+### b. 
+
+```{r}
+table(wine_data$Class)
+```
+
+This result is consistent with the description from wine.names
+
+### c.
+
+#### (1)
+
+```{r}
+cor(wine_data$Alcohol,wine_data$Color_Intensity)
+```
+
+The overall correlation of alcohol and color intensity is **0.546**.
+
+#### (2)
+
+```{r}
+corr_class <- numeric()
+
+for (i in 1:3){
+  class_data <- subset(wine_data,Class==i)
+  corr_class[i]<-cor(class_data$Alcohol,class_data$Color_Intensity)
+} 
+corr_class
+```
+
+This shows that **Class 1 has the highest correlation and Class 2 has the lowest**.
+
+#### (3)
+
+```{r}
+library(dplyr)
+
+max_alcohol <- wine_data %>%
+  arrange(desc(Color_Intensity)) %>%
+  slice(1) %>%
+  pull(Alcohol)
+
+max_alcohol
+```
+
+The wine with highest color intensity has an alcohol content of **14.34**.
+
+#### (4)
+
+```{r}
+wine_data %>%
+  filter(Proanthocyanins > Ash) %>%
+  summarise(perc = (n() / nrow(wine_data)) * 100) %>%
+  pull(perc)
+```
+
+**8.43%** of all wines had a higher content of proanthocyanins compare to ash.
+
+#### 
+
+### d.
+
+```{r}
+avg_table <- wine_data %>%
+  group_by(Class) %>%
+  summarise(across(everything(),mean)) %>%
+  bind_rows(
+    wine_data %>%
+      summarise(across(everything(), mean)) %>%
+      mutate(Class = 0)
+  )
+
+avg_table
+```
+
+```{r}
+avg_table <- avg_table %>%
+  mutate(Class = ifelse(Class == 0, "Overall", as.character(Class))) %>%
+  rename_with(~ paste("Average", ., sep = "_"), -Class)
+
+
+avg_table
+```
+
+This table meets the requirement.
+
+### 
+
+### e.
+
+```{r}
+class_combs <- combn(unique(wine_data$Class), 2, simplify = FALSE)
+
+t_test_results <- lapply(class_combs, function(classes) {
+  subset_data <- wine_data %>% filter(Class %in% classes)
+  t_test_result <- t.test(Total_Phenols ~ Class,data=subset_data)
+  
+    data.frame(
+    Class_Comparison = paste(classes, collapse = " vs "),
+    p_value = t_test_result$p.value
+  )
+})
+
+
+do.call(rbind, t_test_results)
+```
+
+The extremely small p-values here indicate that the difference in Total_Phenols between all wine classes are statistically significant, which means that the phenol level varies greatly between each pair of wine classes.
