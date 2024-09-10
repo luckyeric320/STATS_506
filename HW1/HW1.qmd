@@ -19,7 +19,7 @@ colnames(wine_data) <- c("Class", "Alcohol", "Malic_Acid", "Ash", "Alcalinity_of
 head(wine_data)
 ```
 
-### b. 
+### b.
 
 ```{r}
 table(wine_data$Class)
@@ -127,3 +127,156 @@ do.call(rbind, t_test_results)
 ```
 
 The extremely small p-values here indicate that the difference in Total_Phenols between all wine classes are statistically significant, which means that the phenol level varies greatly between each pair of wine classes.
+
+## Problem 2 - **AskAManager.org Data**
+
+### a. b.
+
+```{r}
+manager_data <- read.csv("AskAManager.csv", header = TRUE)
+colnames(manager_data) <- c(
+  "Index", "timestamp", "age_group", "industry", "job_title", 
+  "job_context", "annual_salary", "monetary_compensation", 
+  "currency", "currency_other", "income_context", "country", 
+  "state", "city", "overall_experience", "field_experience", 
+  "education", "gender", "race"
+)
+head(manager_data)
+```
+
+### c.
+
+```{r}
+nrow(manager_data)
+```
+
+```{r}
+manager_data_usd <-subset(manager_data,currency=='USD')
+nrow(manager_data_usd)
+```
+
+We see that about 5000 samples are filtered after restricting currency to be USD.
+
+### d.
+
+```{r}
+unique(manager_data_usd$age_group)
+unique(manager_data_usd$overall_experience)
+unique(manager_data_usd$field_experience)
+```
+
+```{r}
+age_map <- c("18-24" = 24, "25-34" = 34, "35-44" = 44, "45-54" = 54, "55-64" = 64, "65 or over" = 70)
+
+# Ensure all levels in age_group are included in the map
+manager_data_usd$age_numeric <- as.numeric(age_map[manager_data_usd$age_group])
+
+experience_map <- c("1 year or less" = 0, "2 - 4 years" = 2, "5-7 years" = 5, "8 - 10 years" = 7, 
+                    "11 - 20 years" = 11, "21 - 30 years" = 21, "31 - 40 years" = 31, "41 years or more" = 41)
+
+manager_data_usd$overall_experience_numeric <- as.numeric(experience_map[manager_data_usd$overall_experience])
+manager_data_usd$field_experience_numeric <- as.numeric(experience_map[manager_data_usd$field_experience])
+```
+
+```{r}
+manager_data_cleaned <- subset(manager_data_usd, 
+                               age_numeric >= 18 & 
+                               field_experience_numeric <= overall_experience_numeric & 
+                               overall_experience_numeric <= (age_numeric - 18))
+
+nrow(manager_data_cleaned)
+```
+
+We further filter out about 200 samples.
+
+### e.
+
+```{r}
+quantile(manager_data_usd$annual_salary, probs = c(0.01, 0.05, 0.1, 0.9, 0.95, 0.99))
+```
+
+```{r}
+low_threshold <- 21287.6
+high_threshold <- 275000
+
+manager_data_final <- subset(manager_data_cleaned, 
+                     annual_salary >= low_threshold & annual_salary <= high_threshold)
+nrow(manager_data_final)
+
+
+```
+
+Here to thresholds are set to be the 1% and 99% quantile of the whole filtered dataset. The final sample size is **22673**.
+
+## Problem 3 - Palindromic Numbers
+
+### a.
+
+```{r}
+#' Check if a Number is Palindromic
+#'
+#' This function checks whether a given positive integer is palindromic and returns both the result and the reversed number.
+#'
+#' @param x A positive integer. The function will stop with an error if the input is not a valid positive integer.
+#' @return A list with two elements:
+#' \describe{
+#'   \item{isPalindromic}{A logical value indicating if the input is palindromic (TRUE if it is, FALSE otherwise).}
+#'   \item{reversed}{A string representing the digits of the input number in reverse order.}
+#' }
+isPalindromic <- function(x) {
+  if (!is.numeric(x) || x <= 0 || x != floor(x)) {
+    stop("Invalid input: Please provide a positive integer.")
+  }
+
+  x_str <- as.character(x)
+  
+  reversed_str <- paste(rev(strsplit(x_str, "")[[1]]), collapse = "")
+  
+  is_palindrome <- x_str == reversed_str
+
+  return(list(isPalindromic = is_palindrome, reversed = reversed_str))
+}
+```
+
+```{r}
+isPalindromic(123)
+```
+
+### b.
+
+```{r}
+#' Find the Next Palindromic Number Strictly Greater than the Input
+#'
+#' This function takes a positive integer as input and returns the next palindromic number that is strictly greater than the input.
+#'
+#' @param x A positive integer. The function will stop with an error if the input is not a valid positive integer.
+#' @return A single integer representing the next palindromic number greater than the input.
+nextPalindrome <- function(x) {
+  # Error handling for invalid inputs
+  if (!is.numeric(x) || x <= 0 || x != floor(x)) {
+    stop("Invalid input: Please provide a positive integer.")
+  }
+  
+  current_num <- x + 1
+  while (!isPalindromic(current_num)$isPalindromic) {
+    current_num <- current_num + 1
+  }
+  
+  return(current_num)
+}
+
+```
+
+```{r}
+nextPalindrome(1563)
+```
+
+### c.
+
+```{r}
+inputs <- c(391, 9928, 19272719, 109, 2)
+
+results <- sapply(inputs, nextPalindrome)
+
+results
+```
