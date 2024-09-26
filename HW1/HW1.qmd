@@ -1,8 +1,12 @@
-# HW1
-
-Author: Ruixuan Deng
-
-Date: 09/09/2024
+---
+title: "HW1 STATS506"
+author: "Ruixuan Deng"
+format:
+  html:
+    code-fold: true
+    embed-resources: true
+---
+This is the link to [my repo](https://github.com/luckyeric320/STATS_506.git).
 
 ## Problem 1 - Wine Data
 

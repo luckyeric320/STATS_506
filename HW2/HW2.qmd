@@ -1,0 +1,277 @@
+---
+title: "HW2 STATS506" 
+author: "Ruixuan Deng" 
+format:   
+  html:
+    code-fold: true     
+    embed-resources: true
+---
+
+This is the link to [my repo](https://github.com/luckyeric320/STATS_506.git).
+
+## Problem 1 - Dice Game
+
+### a. b. c.
+
+```{r}
+#' Simulating Dice Game using for Loop
+#'
+#' @param n The number of dice rolls
+#' @return The total winnings.
+#' @examples
+#' play_dice_loop(10)
+#' play_dice_loop(100)
+play_dice_loop <- function(n){
+  total_winnings <- 0
+  for (i in 1:n){
+    total_winnings <- total_winnings - 2 # cost 2 dollars each time
+    
+    roll <- sample(1:6,1)
+    if (roll == 3 || roll == 5){
+        total_winnings <- total_winnings + 2*roll
+    }
+  }
+  return(total_winnings)
+}
+
+set.seed(42)
+play_dice_loop(3)
+play_dice_loop(3000)
+```
+
+```{r}
+#' Simulating Dice Game using Vectorized Functions
+#'
+#' @param n The number of dice rolls
+#' @return The total winnings.
+#' @examples
+#' play_dice_vector(10)
+#' play_dice_vector(100)
+play_dice_vector <- function(n){
+  rolls <- sample(1:6,n,replace = TRUE) # Sample the rolls
+  winnings <- ifelse(rolls==3|rolls==5, 2*rolls,0)
+  return(sum(winnings)-2*n) # Pay the cost for each roll
+}
+
+set.seed(42)
+play_dice_vector(3)
+play_dice_vector(3000)
+```
+
+```{r}
+#' Simulating Dice Game using Table
+#'
+#' @param n The number of dice rolls
+#' @return The total winnings.
+#' @examples
+#' play_dice_table(10)
+#' play_dice_table(100)
+play_dice_table <- function(n){
+  rolls <- sample(1:6,n,replace = TRUE) # Sample the rolls
+  rolls_factor <- factor(rolls,levels=1:6) # Setting the factor to prevent missing values
+  rolls_table <- as.numeric(table(rolls_factor))
+  total_winnings <- (rolls_table[3] * 6) + (rolls_table[5] * 10) - 2*n
+  return(total_winnings)
+}
+
+set.seed(42)
+play_dice_table(3)
+play_dice_table(3000)
+```
+
+```{r}
+#' Simulating Dice Game using apply
+#'
+#' @param n The number of dice rolls
+#' @return The total winnings.
+#' @examples
+#' play_dice_apply(10)
+#' play_dice_apply(100)
+play_dice_apply <- function(n){
+  rolls <- sample(1:6,n,replace = TRUE) # Sample the rolls
+  winnings <- sapply(rolls, function(roll){
+    if (roll == 3|roll ==5 ){
+      return(2*roll)
+    } else{
+      return(0)
+    }
+  })
+  return(sum(winnings)- 2*n)
+}
+
+set.seed(42)
+play_dice_apply(3)
+play_dice_apply(3000)
+```
+
+As we can see these 4 functions have the same results.
+
+### d. 
+
+```{r}
+library(microbenchmark)
+mb <- microbenchmark(
+  loop = play_dice_loop(1000),
+  vectorized = play_dice_vector(1000),
+  table = play_dice_table(1000),
+  apply = play_dice_apply(1000)
+)
+print(mb)
+```
+
+```{r}
+mb_1 <- microbenchmark(
+  loop = play_dice_loop(100000),
+  vectorized = play_dice_vector(100000),
+  table = play_dice_table(100000),
+  apply = play_dice_apply(100000)
+)
+print(mb_1)
+```
+
+From the results we can see that vectorized version is the fastest followed by table, as they both are real vectorized functions. Apply-based function is slower as it implements an implicit loop, and the loop-based version is the slowest.
+
+### e.
+
+```{r}
+
+n_simulations <- 10000
+n_rolls <- 1000
+
+winnings <- replicate(n_simulations, play_dice_vector(n_rolls))
+mean_winnings <- mean(winnings)
+  
+
+mean_winnings
+```
+
+We see from the result that this game is not fair. The player has a positive gain. This is consistent with the expectation total winnings.
+
+# 
+
+## Problem 2 - Linear Regression
+
+### a.
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+cars_data <- read.csv("cars.csv")
+cars_data
+```
+
+```{r}
+# Rename the columns
+
+cars_data <- cars_data %>%
+  rename(
+    Height = Dimensions.Height,
+    Length = Dimensions.Length,
+    Width = Dimensions.Width,
+    Driverline = Engine.Information.Driveline,
+    Engine_Type = Engine.Information.Engine.Type,
+    Hybrid = Engine.Information.Hybrid,
+    Num_Forward_Gear = Engine.Information.Number.of.Forward.Gears,
+    Transimission = Engine.Information.Transmission,
+    City_mpg = Fuel.Information.City.mpg,
+    Fuel_Type = Fuel.Information.Fuel.Type,
+    Highway_mpg = Fuel.Information.Highway.mpg,
+    Classification = Identification.Classification,
+    ID = Identification.ID,
+    Make = Identification.Make,
+    Model_Year = Identification.Model.Year,
+    Year = Identification.Year,
+    Horsepower = Engine.Information.Engine.Statistics.Horsepower,
+    Torque = Engine.Information.Engine.Statistics.Torque
+  )
+
+cars_data
+```
+
+### b.
+
+```{r}
+gasoline_data <- cars_data %>% filter(Fuel_Type == "Gasoline")
+```
+
+### c.
+
+```{r}
+summary(gasoline_data$Highway_mpg)
+```
+
+```{r}
+ggplot(gasoline_data, aes(x = Highway_mpg)) +
+  geom_histogram(binwidth = 2, fill = "blue", color = "black") +
+  labs(title = "Distribution of Highway MPG", x = "Highway MPG")
+```
+
+```{r}
+ggplot(gasoline_data[gasoline_data$Highway_mpg < 200,], aes(x = Highway_mpg)) +
+  geom_histogram(binwidth = 2, fill = "blue", color = "black") +
+  labs(title = "Distribution of Highway MPG w/o Outliers", x = "Highway MPG")
+```
+
+It turns out that after eliminating the outlier, the skewness of the distribution is not extreme so we may not apply any transformation here.
+
+### d.
+
+```{r}
+# Eliminate outliers
+gasoline_data <- gasoline_data[gasoline_data$Highway_mpg < 200,]
+gasoline_data$Year <-as.factor(gasoline_data$Year)
+
+model <- lm(Highway_mpg ~ Torque + Horsepower + Length + Width + Height + Year, data = gasoline_data)
+
+summary(model)
+```
+
+The regression result demonstrates a highly significant relation between torque and highway mpg, i.e., increasing torque by 1 lb/ft will lead to a decrease of about 0.0517 miles-per-gallon for highway driving.
+
+### e.
+
+```{r}
+interaction_model <- lm(Highway_mpg ~ Torque*Horsepower+Length+Height+Width+Year, data = gasoline_data)
+
+summary(interaction_model)
+```
+
+```{r}
+summary(gasoline_data$Horsepower)
+```
+
+The reasonable values of horsepower is chosen to be the 1st, 2nd and 3rd quantile.
+
+```{r}
+library(interactions)
+
+interact_plot(
+  interaction_model, 
+  pred = Torque, 
+  modx = Horsepower, 
+  plot.points = TRUE, 
+  modx.values = c(185, 263, 317),
+  main.title = "Interaction Between Torque and Horsepower on Highway MPG for Year 2011"
+)
+```
+
+### f.
+
+```{r}
+# Create Design Matrix
+X <- model.matrix(~Torque + Horsepower + Length + Width + 
+    Height + Year, data = gasoline_data)
+
+Y <- gasoline_data$Highway_mpg
+
+# Solve the equation
+Beta_hat <-  solve(t(X) %*% X) %*% t(X) %*% Y
+```
+
+```{r}
+print(Beta_hat)
+print(coef(model))
+```
+
+We can see the results are the same.\
