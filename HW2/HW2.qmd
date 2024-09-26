@@ -158,7 +158,6 @@ library(ggplot2)
 library(dplyr)
 
 cars_data <- read.csv("cars.csv")
-cars_data
 ```
 
 ```{r}
@@ -186,7 +185,6 @@ cars_data <- cars_data %>%
     Torque = Engine.Information.Engine.Statistics.Torque
   )
 
-cars_data
 ```
 
 ### b.
