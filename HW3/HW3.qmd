@@ -1,0 +1,420 @@
+---
+title: "HW3"
+author: "Ruixuan Deng"
+format:   
+  html:
+    code-fold: true     
+    embed-resources: true
+---
+
+This is the link to [my repo](https://github.com/luckyeric320/STATS_506.git).
+
+```{r}
+library(tidyverse)
+library(haven) 
+library(dplyr)
+library(stargazer)
+library(broom)
+library(DBI)
+```
+
+## Problem 1 Vision
+
+### a.
+
+```{r}
+urls <- list(
+  'VIX' = 'https://wwwn.cdc.gov/Nchs/Nhanes/2005-2006/VIX_D.XPT',
+  'DEMO' = 'https://wwwn.cdc.gov/Nchs/Nhanes/2005-2006/DEMO_D.XPT'
+)
+```
+
+```{r}
+#' Load NHANES data from a URL
+#'
+#' This function downloads NHANES data from a provided URL in `.XPT` (SAS Transport) format,
+#' reads it into R as a data frame, and deletes the temporary file afterward.
+#'
+#' @param url A character string representing the URL of the `.XPT` file to download.
+#'
+#' @return A data frame containing the NHANES data from the `.XPT` file.
+#'
+#' @details The function first downloads the `.XPT` file from the specified URL into a temporary file.
+#' It then reads the data using `haven::read_xpt()` and removes the temporary file afterward.
+#' 
+#' This function is useful for quickly loading NHANES datasets from the CDC website or similar sources.
+#'
+#' @examples
+#' \dontrun{
+#' # Load VIX data
+#' vix_data <- load_nhanes_data('https://wwwn.cdc.gov/Nchs/Nhanes/2005-2006/VIX_D.XPT')
+#'
+#' # Load DEMO data
+#' demo_data <- load_nhanes_data('https://wwwn.cdc.gov/Nchs/Nhanes/2005-2006/DEMO_D.XPT')
+#' }
+#' 
+#' @export
+load_nhanes_data <- function(url) {
+  temp_file <- tempfile(fileext = ".XPT")
+  download.file(url, temp_file, mode = "wb")
+  data <- read_xpt(temp_file)
+  unlink(temp_file)
+  return(data)
+}
+```
+
+```{r}
+vix_df <- load_nhanes_data(urls[['VIX']])
+demo_df <- load_nhanes_data(urls[['DEMO']])
+
+data_df <- inner_join(vix_df,demo_df,by="SEQN")
+nrow(data_df)
+```
+
+### b.
+
+```{r}
+
+# We use RIDAGEYR to first group the data by different age groups and then calculate the proportion
+age_group_summary <- data_df %>%
+  mutate(age_group = cut(  
+    RIDAGEYR,
+    breaks = seq(0,90,by=10), # Divide age groups
+    right = FALSE,
+    label = paste(seq(0, 80,by=10), seq(9,89,by=10),sep="-")
+  )) %>%
+  group_by(age_group) %>%
+  summarize(
+    proportion_glass_distance = mean(VIQ220==1, na.rm=TRUE) # Estimate proportion by mean
+  ) %>%
+  select(age_group, proportion_glass_distance) %>% 
+  mutate( # for better table
+    age_group = as.character(age_group),  
+    proportion_glass_distance = round(proportion_glass_distance, 3) 
+  )   %>%
+  rename(
+    'Age Group' = age_group,
+    'Propertion' = proportion_glass_distance
+  ) 
+
+```
+
+```{r}
+stargazer(
+  age_group_summary, 
+  type = 'html',
+  summary = FALSE,                 
+  title = "Proportion of Respondents Wearing Glasses/Contact Lenses for Distance Vision by Age Group",
+  align=TRUE
+)
+```
+<table style="text-align:center"><caption><strong>Proportion of Respondents Wearing Glasses/Contact Lenses for Distance Vision by Age Group</strong></caption>
+<tr><td colspan="3" style="border-bottom: 1px solid black"></td></tr><tr><td></td><td>Age Group</td><td>Propertion</td></tr>
+<tr><td colspan="3" style="border-bottom: 1px solid black"></td></tr><tr><td>1</td><td>10-19</td><td>0.321</td></tr>
+<tr><td>2</td><td>20-29</td><td>0.326</td></tr>
+<tr><td>3</td><td>30-39</td><td>0.359</td></tr>
+<tr><td>4</td><td>40-49</td><td>0.37</td></tr>
+<tr><td>5</td><td>50-59</td><td>0.55</td></tr>
+<tr><td>6</td><td>60-69</td><td>0.622</td></tr>
+<tr><td>7</td><td>70-79</td><td>0.669</td></tr>
+<tr><td>8</td><td>80-89</td><td>0.669</td></tr>
+<tr><td colspan="3" style="border-bottom: 1px solid black"></td></tr></table>
+### c.
+
+```{r}
+# The variables here to be used are
+# RIDAGEYR: age
+# RIDETH1: race/ethnicity
+# RIAGENDR: gender
+# INDFMPIR: poverty incomte ration
+# VIQ220: whether wear glasses/contact lenses for distance vision
+# For better interpretation we first select and mutate the data
+
+lm_data <- data_df %>%
+  select(
+    SEQN,
+    RIDAGEYR,
+    RIDRETH1,
+    RIAGENDR,
+    INDFMPIR,
+    VIQ220
+  ) %>% # filter NA data
+  filter(!is.na(RIDAGEYR) & !is.na(RIDRETH1) & !is.na(RIAGENDR) & !is.na(INDFMPIR) & !is.na(VIQ220)) %>%
+  mutate(
+    wear_glasses = ifelse(VIQ220==1,1,0),
+    gender = factor(RIAGENDR, labels = c('Male','Female')),
+    race = factor(RIDRETH1)
+  ) %>%
+  rename(
+    age = RIDAGEYR,
+    poverty_income_ratio = INDFMPIR
+  )
+
+head(lm_data)
+```
+
+```{r}
+lm1 <- glm(wear_glasses ~ age, data=lm_data, family=binomial())
+lm2 <- glm(wear_glasses ~ age + race + gender, data=lm_data, family=binomial())
+lm3 <- glm(wear_glasses ~ age + race + gender + poverty_income_ratio, data=lm_data, family=binomial())
+```
+
+```{r}
+# Calculate pseudo r2 manually
+pseudo_r2_lm1 <- 1 - (logLik(lm1) / logLik(update(lm1, . ~ 1)))
+pseudo_r2_lm2 <- 1 - (logLik(lm2) / logLik(update(lm2, . ~ 1)))
+pseudo_r2_lm3 <- 1 - (logLik(lm3) / logLik(update(lm3, . ~ 1)))
+```
+
+```{r}
+stargazer(
+  lm1, lm2, lm3, 
+  type = "html",                    
+  dep.var.labels = "Wears Glasses/Contacts for Distance Vision",  
+  covariate.labels = c(
+    "Age",
+    "Race - Other Hispanic",
+    "Race - Non-Hispanic White", 
+    "Race - Non-Hispanic Black", 
+    "Other Race - Including Multi-Racial",
+    "Gender - Female",
+    "Poverty Income Ratio"),
+  apply.coef = exp,                 
+  omit.stat = c("LL", "f"),  # Omit log-likelihood, standard error, and F-statistic
+  add.lines = list(
+    c("Pseudo R²", round(pseudo_r2_lm1, 3), round(pseudo_r2_lm2, 3), round(pseudo_r2_lm3, 3)) 
+  )
+)
+```
+<table style="text-align:center"><tr><td colspan="4" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left"></td><td colspan="3"><em>Dependent variable:</em></td></tr>
+<tr><td></td><td colspan="3" style="border-bottom: 1px solid black"></td></tr>
+<tr><td style="text-align:left"></td><td colspan="3">Wears Glasses/Contacts for Distance Vision</td></tr>
+<tr><td style="text-align:left"></td><td>(1)</td><td>(2)</td><td>(3)</td></tr>
+<tr><td colspan="4" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left">Age</td><td>1.025<sup>***</sup></td><td>1.023<sup>***</sup></td><td>1.022<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td>(0.001)</td><td>(0.001)</td><td>(0.001)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left">Race - Other Hispanic</td><td></td><td>1.170<sup>***</sup></td><td>1.125<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td></td><td>(0.168)</td><td>(0.168)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left">Race - Non-Hispanic White</td><td></td><td>1.895<sup>***</sup></td><td>1.652<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td></td><td>(0.072)</td><td>(0.075)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left">Race - Non-Hispanic Black</td><td></td><td>1.294<sup>***</sup></td><td>1.232<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td></td><td>(0.079)</td><td>(0.079)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left">Other Race - Including Multi-Racial</td><td></td><td>1.885<sup>***</sup></td><td>1.706<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td></td><td>(0.139)</td><td>(0.140)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left">Gender - Female</td><td></td><td>1.650<sup>***</sup></td><td>1.674<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td></td><td>(0.054)</td><td>(0.054)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left">Poverty Income Ratio</td><td></td><td></td><td>1.120<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td>(0.018)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left">Constant</td><td>0.292<sup>***</sup></td><td>0.165<sup>**</sup></td><td>0.133</td></tr>
+<tr><td style="text-align:left"></td><td>(0.055)</td><td>(0.080)</td><td>(0.088)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td></tr>
+<tr><td colspan="4" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left">Pseudo R²</td><td>0.047</td><td>0.069</td><td>0.073</td></tr>
+<tr><td style="text-align:left">Observations</td><td>6,249</td><td>6,249</td><td>6,249</td></tr>
+<tr><td style="text-align:left">Akaike Inf. Crit.</td><td>8,121.692</td><td>7,951.258</td><td>7,912.077</td></tr>
+<tr><td colspan="4" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left"><em>Note:</em></td><td colspan="3" style="text-align:right"><sup>*</sup>p<0.1; <sup>**</sup>p<0.05; <sup>***</sup>p<0.01</td></tr>
+</table>
+### d.
+
+```{r}
+tidy(lm3, exponentiate = TRUE) 
+```
+
+We can see from p value that gender is significant for the odds of wearing glasses. This is from the z test.
+
+```{r}
+gender_glasses_table <- table(lm_data$gender, lm_data$wear_glasses)
+chisq_test <- chisq.test(gender_glasses_table)
+chisq_test
+
+```
+
+The chi-squared result here also shows the significance of gender.
+
+## Problem 2 **Sakila**
+
+### a.
+
+```{r}
+sakila <- dbConnect(RSQLite::SQLite(),"sakila_master.db")
+dbListTables(sakila)
+```
+
+```{r}
+dbGetQuery(
+  sakila,
+  "
+  SELECT release_year, COUNT(*) AS movies_in_oldest_year
+  From film
+  WHERE release_year = (SELECT MIN(release_year) FROM film)
+  GROUP BY release_year;
+  "
+)
+```
+
+### b. 
+
+```{r}
+dbGetQuery(
+  sakila,
+  "
+  SELECT c.name AS genre, COUNT(f.film_id) AS num_movie
+  FROM film AS f
+  JOIN film_category AS fc ON f.film_id = fc.film_id
+  JOIN category AS c ON fc.category_id = c.category_id
+  GROUP BY c.name
+  ORDER BY num_movie ASC
+  LIMIT 1;
+  "
+)
+```
+
+```{r}
+film_df <- dbGetQuery(sakila, "SELECT * FROM film")
+category_df <- dbGetQuery(sakila, "SELECT * FROM category")
+film_category_df <- dbGetQuery(sakila, "SELECT * FROM film_category")
+
+head(film_df)
+head(category_df)
+head(film_category_df)
+```
+
+```{r}
+film_df %>%
+  inner_join(film_category_df, by = "film_id") %>%
+  inner_join(category_df, by = "category_id") %>%
+  group_by(name) %>%
+  summarise(num_movie = n()) %>%
+  arrange(num_movie) %>%
+  slice(1)
+```
+
+### c.
+
+```{r}
+dbGetQuery(
+  sakila,
+  "
+  SELECT co.country, COUNT(c.customer_id) AS num_customer
+  FROM customer AS c
+  JOIN address AS a ON c.address_id = a.address_id
+  JOIN city AS ci ON a.city_id = ci.city_id
+  JOIN country AS co ON ci.country_id = co.country_id
+  GROUP BY co.country
+  HAVING num_customer = 13
+  "
+)
+```
+
+```{r}
+
+customer_df <- dbGetQuery(sakila, "SELECT * FROM customer")
+address_df <- dbGetQuery(sakila, "SELECT * FROM address")
+city_df <- dbGetQuery(sakila, "SELECT * FROM city")
+country_df <- dbGetQuery(sakila, "SELECT * FROM country")
+```
+
+```{r}
+customer_df %>%
+  inner_join(address_df, by = "address_id") %>%
+  inner_join(city_df, by = "city_id") %>%
+  inner_join(country_df, by = "country_id") %>%
+  group_by(country) %>%
+  summarise(customer_count = n()) %>%
+  filter(customer_count == 13) 
+```
+
+So Nigeria and Argentina are the two countries that meet the requirement.
+
+## Problem 3
+
+### a. 
+
+```{r}
+us_500_data <-read.csv("us-500.csv")
+head(us_500_data)
+```
+
+```{r}
+us_500_data %>%
+  mutate(is_com = grepl("\\.com$", email)) %>%
+  summarise(proportion = mean(is_com))
+```
+
+So the proportion with '.com' in TLD is 73.2%.
+
+### b.
+
+```{r}
+us_500_data %>%
+  mutate(non_alphanumeric = grepl("[^[:alnum:]@\\.]", email)) %>%
+  summarise(proportion = mean(non_alphanumeric))
+```
+
+The proportion for having non alphanumeric characters except @ and . is 24.8%.
+
+### c.
+
+```{r}
+area_code1 <- substr(us_500_data$phone1,1,3)
+area_code2 <- substr(us_500_data$phone2,1,3)
+
+area_code_table <- table(c(area_code1, area_code2))
+
+sort(area_code_table, decreasing = TRUE)[1:5]
+```
+
+The top 5 area codes are 973, 212, 215, 410, 201.
+
+### d. 
+
+```{r}
+hist_data <- us_500_data %>%
+  mutate(apartment_number = as.numeric(sub(".*\\D(\\d+)$", "\\1", address))) %>% #Extract the last digit sequence following non-digit
+  filter(!is.na(apartment_number)) %>%
+  mutate(log_apartment_number = log(apartment_number))
+
+hist(hist_data$log_apartment_number, 
+     main = "Histogram of the Log of Apartment Numbers", 
+     xlab = "Log of Apartment Number", 
+     col = "skyblue")
+```
+
+### e. 
+
+```{r}
+hist_data <- hist_data %>%
+  mutate(leading_digit = as.numeric(substr(apartment_number, 1, 1)))%>%
+  count(leading_digit) %>%
+  mutate(observed_proportion = n / sum(n)) 
+```
+
+```{r}
+benfords_law <- data.frame(
+  leading_digit = 1:9,
+  expected_proportion = log10(1 + 1 / (1:9))  
+)
+
+comparison <- merge(hist_data, benfords_law, by = "leading_digit", all = TRUE)
+```
+
+```{r}
+library(ggplot2)
+
+ggplot(comparison, aes(x = as.factor(leading_digit))) +
+  geom_bar(aes(y = observed_proportion), stat = "identity", fill = "lightblue", alpha = 0.7) +
+  geom_line(aes(y = expected_proportion, group = 1), color = "red", size = 1) +
+  geom_point(aes(y = expected_proportion), color = "red", size = 2) +
+  labs(title = "Observed vs. Expected Leading Digits (Benford's Law)",
+       x = "Leading Digit",
+       y = "Proportion") +
+  theme_minimal() +
+  scale_y_continuous(labels = scales::percent)
+```
+
+The distribution of this synthetic data leading digit is far from Benford's Law, and is easy to be distinguished from real world data.
