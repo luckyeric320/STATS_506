@@ -1,0 +1,279 @@
+---
+title: "HW5"
+author: "Ruixuan Deng"
+format:   
+  html:
+    code-fold: true     
+    embed-resources: true
+---
+
+This is the link to [my repo](https://github.com/luckyeric320/STATS_506.git).
+
+# Problem 1 - OOP
+
+## a.
+
+```{r}
+library(Rcpp)
+
+cppFunction('
+int GCD(int a, int b) {
+    return std::gcd(a, b);
+}
+int LCM(int a, int b) {
+    return abs(a * b) / GCD(a, b);
+}
+')
+```
+
+```{r}
+##' S4 Class for Rational Numbers
+##'
+##' The `rational` class represents a rational number with a numerator and denominator.
+##'
+##' @slot numerator An integer representing the numerator.
+##' @slot denominator An integer representing the denominator. Must be non-zero.
+setClass(
+  "rational",
+  slots = c(numerator = "integer", denominator = "integer"),
+  validity = function(object) {
+    if (object@denominator == 0) {
+      return("Denominator cannot be zero.")
+    }
+    TRUE
+  }
+)
+
+rational <- function(numerator, denominator = 1L) {
+  if (denominator == 0) {
+    stop("Denominator cannot be zero.")
+  }
+  new("rational", numerator = as.integer(numerator), denominator = as.integer(denominator))
+}
+
+setMethod("show", "rational", function(object) {
+  cat(sprintf("%d/%d\n", object@numerator, object@denominator))
+})
+
+simplify <- function(r) {
+  gcd <- GCD(r@numerator, r@denominator)
+  new("rational",
+      numerator = as.integer(r@numerator / gcd),
+      denominator = as.integer(r@denominator / gcd))
+}
+
+quotient <- function(r, digits = getOption("digits")) {
+  value <- r@numerator / r@denominator
+  formatted_value <- format(value, digits = digits)
+  print(formatted_value)
+  invisible(value)
+}
+
+setMethod("+", c("rational", "rational"), function(e1, e2) {
+  num <- e1@numerator * e2@denominator + e2@numerator * e1@denominator
+  denom <- e1@denominator * e2@denominator
+  simplify(rational(num, denom))
+})
+
+setMethod("-", c("rational", "rational"), function(e1, e2) {
+  num <- e1@numerator * e2@denominator - e2@numerator * e1@denominator
+  denom <- e1@denominator * e2@denominator
+  simplify(rational(num, denom))
+})
+
+setMethod("*", c("rational", "rational"), function(e1, e2) {
+  num <- e1@numerator * e2@numerator
+  denom <- e1@denominator * e2@denominator
+  simplify(rational(num, denom))
+})
+
+setMethod("/", c("rational", "rational"), function(e1, e2) {
+  if (e2@numerator == 0) {
+    stop("Division by zero.")
+  }
+  num <- e1@numerator * e2@denominator
+  denom <- e1@denominator * e2@numerator
+  simplify(rational(num, denom))
+})
+
+
+```
+
+## b. 
+
+```{r}
+r1 <- rational(12, 15)
+r2 <- rational(7, 11)
+r3 <- rational(0, 8)
+```
+
+```{r}
+#| error: true
+#| results: 'markup'
+r1
+r3
+r1 + r2
+r1 - r2
+r1 * r2
+r1 / r2
+r1 + r3
+r1 * r3
+r2 / r3
+quotient(r1)
+quotient(r2)
+quotient(r2, digits = 3)
+quotient(r2, digits = 3.14)
+quotient(r2, digits = "avocado")
+q2 <- quotient(r2, digits = 3)
+q2
+quotient(r3)
+simplify(r1)
+simplify(r2)
+simplify(r3)
+```
+
+## c. 
+
+```{r}
+#| error: true
+r4 <- rational(4,0)
+```
+
+```{r}
+#| error: true
+r4 <- rational(4,3,2)
+```
+
+```{r}
+r4 <- rational('4','3')
+r4
+```
+
+```{r}
+r4 <- rational('4/3')
+```
+
+```{r}
+r4 <- rational(1.5,4.3)
+r4
+```
+
+# Problem 2 - plotly
+
+## a.
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+art_sales <- read.csv("df_for_ml_improved_new_market.csv")
+art_sales <- art_sales %>%
+  pivot_longer(cols = starts_with("Genre___"), names_to = "Genre", values_to = "Value") %>%
+  filter(Value == 1) %>%
+  mutate(Genre = str_replace(Genre, "Genre___", "")) %>%
+  select(-Value)
+
+ggplot(art_sales, aes(x = factor(year), fill = Genre)) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  labs(title = "Distribution of Genre of Sales Across Years", x = "Year", y = "Proportion of Sales") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## b.
+
+```{r}
+library(plotly)
+library(dplyr)
+
+```
+
+```{r}
+interactive_data <- art_sales %>%
+  group_by(year, Genre) %>%
+  summarize(median_price = median(price_usd, na.rm = TRUE), .groups = "drop")
+```
+
+```{r}
+interactive_plot <- plot_ly(
+  data = interactive_data,
+  x = ~year,
+  y = ~median_price,
+  color = ~Genre,
+  type = 'scatter',
+  mode = 'lines+markers',
+  hoverinfo = 'text',
+  text = ~paste("Year:", year, "<br>Genre:", Genre, "<br>Median Price (USD):", median_price)
+) %>%
+  layout(
+    title = "Sales Price in USD Over Time by Genre",
+    xaxis = list(title = "Year"),
+    yaxis = list(title = "Median Price (USD)"),
+    legend = list(title = list(text = "Genre")),
+    hovermode = "closest"
+  )
+
+interactive_plot
+```
+
+# Problem 3 - data.table
+
+```{r}
+library(data.table)
+library(nycflights13)
+```
+
+```{r}
+flights_dt <- as.data.table(flights)
+airports_dt <- as.data.table(airports)
+planes_dt <- as.data.table(planes)
+```
+
+## a.
+
+```{r}
+departure_delay_dt <- flights_dt[, .(
+  mean_departure_delay = mean(dep_delay, na.rm = TRUE),
+  median_departure_delay = median(dep_delay, na.rm = TRUE),
+  flight_count = .N
+), by = .(dest)][flight_count >= 10]
+
+departure_delay_dt <- merge(departure_delay_dt, airports_dt, by.x = "dest", by.y = "faa")
+departure_delay_dt <- departure_delay_dt[
+  order(-mean_departure_delay), 
+  .(name, mean_departure_delay, median_departure_delay)
+]
+
+print(departure_delay_dt)
+```
+
+```{r}
+arrival_delay_dt <- flights_dt[, .(
+  mean_arrival_delay = mean(arr_delay, na.rm = TRUE),
+  median_arrival_delay = median(arr_delay, na.rm = TRUE),
+  flight_count = .N
+), by = .(dest)][flight_count >= 10]
+
+arrival_delay_dt <- merge(arrival_delay_dt, airports_dt, by.x = "dest", by.y = "faa")
+arrival_delay_dt <- arrival_delay_dt[
+  order(-mean_arrival_delay), 
+  .(name, mean_arrival_delay, median_arrival_delay)
+]
+
+print(arrival_delay_dt)
+```
+
+## b. 
+
+```{r}
+fastest_aircraft_dt <- flights_dt[
+  !is.na(air_time), 
+  .(avg_speed = mean(distance / (air_time / 60), na.rm = TRUE), flight_count = .N), 
+  by = .(tailnum)
+][order(-avg_speed)][1]
+
+fastest_aircraft_dt <- merge(fastest_aircraft_dt, planes_dt, by = "tailnum")
+fastest_aircraft_dt <- fastest_aircraft_dt[, .(model, avg_speed, flight_count)]
+
+fastest_aircraft_dt
+```
