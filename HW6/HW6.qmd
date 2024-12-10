@@ -1,0 +1,196 @@
+---
+title: "HW6"
+author: "Ruixuan Deng"
+format:   
+  html:
+    code-fold: true     
+    embed-resources: true
+---
+
+# Stratified Bootstrapping
+
+This is the link to [my repo](https://github.com/luckyeric320/STATS_506.git).
+
+## a.
+
+```{r}
+library(tidyverse)
+library(DBI)
+```
+
+```{r}
+lahman <- dbConnect(RSQLite::SQLite(), "lahman_1871-2022.sqlite")
+```
+
+```{r}
+fielding_data <- dbGetQuery(lahman, "SELECT * FROM Fielding")
+head(fielding_data)
+```
+
+```{r}
+fielding_data <- fielding_data %>%
+  filter(!is.na(InnOuts) & InnOuts > 0) %>%  
+  mutate(RF = (PO + A) / (InnOuts / 3))
+
+team_RF <- fielding_data %>%
+  group_by(teamID) %>%
+  summarise(avg_RF = mean(RF, na.rm = TRUE))
+
+team_RF
+```
+
+### (1) Without Parallel Processing
+
+```{r}
+B <- 1000
+set.seed(2024)
+
+bootstrap_RF <- function(data, B) {
+  team_list <- split(data, data$teamID)
+  boot_estimates <- vector("list", B)
+  
+  for (i in 1:B) {
+    boot_sample <- lapply(team_list, function(team_data) {
+      team_data[sample(nrow(team_data), replace = TRUE), ]
+    })
+    boot_data <- bind_rows(boot_sample)
+    boot_team_RF <- boot_data %>%
+      group_by(teamID) %>%
+      summarise(avg_RF = mean(RF, na.rm = TRUE))
+    boot_estimates[[i]] <- boot_team_RF
+  }
+  boot_estimates
+}
+```
+
+```{r}
+start_time_no_parallel <- Sys.time()
+boot_estimates_no_parallel <- bootstrap_RF(fielding_data, B)
+end_time_no_parallel <- Sys.time()
+time_no_parallel <- end_time_no_parallel - start_time_no_parallel
+```
+
+```{r}
+boot_results_no_parallel <- bind_rows(boot_estimates_no_parallel, .id = "bootstrap")
+
+se_no_parallel <- boot_results_no_parallel %>%
+  group_by(teamID) %>%
+  summarise(se_RF = sd(avg_RF, na.rm = TRUE))
+```
+
+### (2) With Parallel
+
+```{r}
+library(parallel)
+
+no_cores <- detectCores() - 1
+
+parallel_bootstrap_RF <- function(data, B) {
+  team_list <- split(data, data$teamID)
+
+  cl <- makeCluster(no_cores%/%2)
+  
+  clusterExport(cl, varlist = c("team_list"), envir = environment())
+  clusterEvalQ(cl, library(dplyr))
+
+  clusterSetRNGStream(cl, 2024)
+  
+  boot_estimates <- parLapply(cl, 1:B, function(i) {
+    boot_sample <- lapply(team_list, function(team_data) {
+      team_data[sample(nrow(team_data), replace = TRUE), ]
+    })
+    boot_data <- bind_rows(boot_sample)
+    boot_team_RF <- boot_data %>%
+      group_by(teamID) %>%
+      summarise(avg_RF = mean(RF, na.rm = TRUE))
+    boot_team_RF
+  })
+  
+  stopCluster(cl)
+  
+  boot_estimates
+}
+
+```
+
+```{r}
+start_time_parallel <- Sys.time()
+boot_estimates_parallel <- parallel_bootstrap_RF(fielding_data, B)
+end_time_parallel <- Sys.time()
+time_parallel <- end_time_parallel - start_time_parallel
+```
+
+```{r}
+boot_results_parallel <- bind_rows(boot_estimates_parallel, .id = "bootstrap")
+
+se_parallel <- boot_results_parallel %>%
+  group_by(teamID) %>%
+  summarise(se_RF = sd(avg_RF, na.rm = TRUE))
+
+```
+
+### (3) Future
+
+```{r}
+library(future)
+library(future.apply)
+
+plan(multisession, workers = no_cores%/%2)
+
+future_bootstrap_RF <- function(data, B) {
+  team_list <- split(data, data$teamID)
+  
+  boot_estimates <- future_lapply(1:B, function(i) {
+    boot_sample <- lapply(team_list, function(team_data) {
+      team_data[sample(nrow(team_data), replace = TRUE), ]
+    })
+    boot_data <- bind_rows(boot_sample)
+    boot_team_RF <- boot_data %>%
+      group_by(teamID) %>%
+      summarise(avg_RF = mean(RF, na.rm = TRUE))
+    boot_team_RF
+  }, future.seed=TRUE)
+  
+  boot_estimates
+}
+```
+
+```{r}
+start_time_future <- Sys.time()
+boot_estimates_future <- future_bootstrap_RF(fielding_data, B)
+end_time_future <- Sys.time()
+time_future <- end_time_future - start_time_future
+
+plan(sequential)
+```
+
+```{r}
+boot_results_future <- bind_rows(boot_estimates_future, .id = "bootstrap")
+
+se_future <- boot_results_future %>%
+  group_by(teamID) %>%
+  summarise(se_RF = sd(avg_RF, na.rm = TRUE))
+```
+
+## b.
+
+```{r}
+combined_results <- team_RF %>%
+  left_join(se_no_parallel %>% rename(se_RF_no_parallel = se_RF), by = "teamID") %>%
+  left_join(se_parallel %>% rename(se_RF_parallel = se_RF), by = "teamID") %>%
+  left_join(se_future %>% rename(se_RF_future = se_RF), by = "teamID") %>%
+  arrange(desc(avg_RF)) %>%
+  slice(1:10)
+
+combined_results
+```
+
+## c. 
+
+```{r}
+time_no_parallel
+time_parallel
+time_future
+```
+
+The fastest results is given by parallel package, which is close to the result of future. The non-parallel method produces significantly longer time to get the result. The future package is more user-friendly and easy to use.
