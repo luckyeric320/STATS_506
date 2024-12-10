@@ -1,0 +1,405 @@
+---
+title: "MoLRG_experiment"
+format: html
+editor: visual
+---
+
+# Investigation on Mixture of Low Rank Gaussian (MoLRG)  Model
+
+```{r}
+library(MASS)
+library(mclust)
+library(ggplot2)
+library(tidyverse)
+library(Matrix)
+library(expm)
+library(dbscan)
+library(cluster)
+library(RSpectra)
+
+```
+
+## Synthetic Data Generation
+
+```{r}
+#' Generate samples from mixture of low-rank Gaussians
+#' @param n Number of samples
+#' @param ambient_dim Dimension of ambient space (n in the definition)
+#' @param K Number of components
+#' @param ranks Vector of ranks (d_k in the definition) for each component
+#' @param mixing_props Vector of mixing proportions (pi_k in the definition)
+#' @param noise_sd Standard deviation of additive noise (0 for no noise)
+#' @return List containing data matrix X and true labels
+generate_low_rank_mixture <- function(n, ambient_dim, K, ranks, mixing_props, noise_sd = 0) {
+  # Input validation
+  stopifnot(
+    length(ranks) == K,
+    length(mixing_props) == K,
+    abs(sum(mixing_props) - 1) < 1e-10,
+    all(mixing_props >= 0),
+    all(ranks <= ambient_dim)
+  )
+  
+  # Initialize outputs
+  X <- matrix(0, n, ambient_dim)
+  true_labels <- numeric(n)
+  
+  # Generate orthonormal basis for each component
+  U_stars <- lapply(ranks, function(r) {
+    # QR decomposition of random matrix to get orthonormal basis
+    qr.Q(qr(matrix(rnorm(ambient_dim * r), ambient_dim, r)))
+  })
+  
+  # Generate samples according to mixing proportions
+  sample_counts <- rmultinom(1, n, mixing_props)[,1]
+  current_idx <- 1
+  
+  for(k in 1:K) {
+    if(sample_counts[k] > 0) {
+      # Get indices for current component
+      idx <- current_idx:(current_idx + sample_counts[k] - 1)
+      
+      # Generate from N(0, U_k U_k^T)
+      Z <- matrix(rnorm(sample_counts[k] * ranks[k]), sample_counts[k], ranks[k])
+      X[idx,] <- Z %*% t(U_stars[[k]])
+      
+      # Add noise if specified
+      if(noise_sd > 0) {
+        X[idx,] <- X[idx,] + matrix(rnorm(sample_counts[k] * ambient_dim, 0, noise_sd), 
+                                   sample_counts[k], ambient_dim)
+      }
+      
+      # Store true labels
+      true_labels[idx] <- k
+      current_idx <- current_idx + sample_counts[k]
+    }
+  }
+  
+  return(list(
+    X = X,                 # Data matrix
+    labels = true_labels,  # True component labels
+    U = U_stars,          # Generated basis matrices
+    counts = sample_counts # Samples per component
+  ))
+}
+
+```
+
+```{r}
+# Parameters
+n <- 1000              # number of samples
+ambient_dim <- 100     # ambient dimension
+K <- 3                 # number of components
+ranks <- c(5, 5, 5)    # rank of each component
+mixing_props <- c(1/3, 1/3, 1/3)  # equal mixing proportions
+noise_sd <- 0.1        # noise level
+
+# Generate data
+result <- generate_low_rank_mixture(n, ambient_dim, K, ranks, mixing_props, noise_sd)
+
+# Verify structure with SVD
+svd_result <- svd(scale(result$X, center = TRUE, scale = FALSE))
+eigenvalues <- svd_result$d^2
+
+# Simple scree plot
+plot(eigenvalues[1:30], type = "l", 
+     xlab = "Index", ylab = "Eigenvalue",
+     main = "Scree Plot (First 30 Eigenvalues)")
+```
+
+## Clustering Methods
+
+```{r}
+#' Spectral clustering
+#' @param similarity_matrix Similarity matrix
+#' @param k Number of clusters
+#' @return Vector of cluster assignments
+spectral_clustering <- function(similarity_matrix, k) {
+  # Compute Laplacian
+  D <- diag(rowSums(similarity_matrix))
+  L <- D - similarity_matrix
+  
+  # Compute eigenvectors
+  eig <- RSpectra::eigs_sym(L, k)
+  embedding <- eig$vectors
+  
+  # Cluster the embedding
+  kmeans(embedding, centers = k)$cluster
+}
+```
+
+## Main Experiment
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+#' Run clustering methods and compute ARI
+#' @param X Data matrix
+#' @param true_labels True cluster labels
+#' @param K Number of clusters
+#' @return Named vector of ARI values
+evaluate_clustering <- function(X, true_labels, K) {
+  # K-means
+  km <- kmeans(X, centers = K, nstart = 10)
+  
+  # Hierarchical clustering
+  hc <- cutree(hclust(dist(X), method = "ward.D2"), k = K)
+  
+  # GMM
+  gmm <- Mclust(X, G = K)
+  
+  # Spectral clustering
+  dist_mat <- as.matrix(dist(X))
+  sigma <- mean(dist_mat)
+  similarity <- exp(-dist_mat^2 / (2 * sigma^2))
+  spec <- spectral_clustering(similarity, K)
+  
+  # Calculate ARI for each method
+  ari_values <- c(
+    kmeans = adjustedRandIndex(true_labels, km$cluster),
+    hierarchical = adjustedRandIndex(true_labels, hc),
+    gmm = adjustedRandIndex(true_labels, gmm$classification),
+    spectral = adjustedRandIndex(true_labels, spec)
+  )
+  
+  return(ari_values)
+}
+
+#' Run experiment with multiple repetitions
+#' @param n_reps Number of repetitions
+#' @return Dataframe with results
+run_experiment <- function(n_reps = 30) {
+  # Parameters
+  n_samples <- 1000
+  ambient_dim <- 100
+  
+  # Experiment conditions
+  conditions <- list(
+    # Default case
+    list(K = 5, ranks = rep(5, 5), noise = 0, condition = "default"),
+    
+    # Varying components
+    list(K = 10, ranks = rep(5, 10), noise = 0, condition = "more_components"),
+    list(K = 15, ranks = rep(5, 15), noise = 0, condition = "most_components"),
+    
+    # Varying ranks
+    list(K = 5, ranks = c(5,5,10,15,20), noise = 0, condition = "mixed_ranks"),
+    list(K = 5, ranks = rep(20, 5), noise = 0, condition = "high_ranks"),
+    
+    # Varying noise
+    list(K = 5, ranks = rep(5, 5), noise = 0.1, condition = "low_noise"),
+    list(K = 5, ranks = rep(5, 5), noise = 0.3, condition = "high_noise")
+  )
+  
+  # Initialize results dataframe
+  results <- data.frame()
+  
+  # Run experiments
+  for(cond in conditions) {
+    for(rep in 1:n_reps) {
+      # Generate data
+      data <- generate_low_rank_mixture(
+        n = n_samples,
+        ambient_dim = ambient_dim,
+        K = cond$K,
+        ranks = cond$ranks,
+        mixing_props = rep(1/cond$K, cond$K),
+        noise_sd = cond$noise
+      )
+      
+      # Evaluate clustering
+      ari_values <- evaluate_clustering(data$X, data$labels, cond$K)
+      
+      # Store results
+      results <- rbind(results, 
+                      data.frame(
+                        condition = cond$condition,
+                        method = names(ari_values),
+                        ari = ari_values,
+                        rep = rep
+                      ))
+    }
+  }
+  
+  return(results)
+}
+
+# Run experiment
+set.seed(123)
+results <- run_experiment(n_reps = 30)
+
+# Calculate summary statistics
+summary_stats <- results %>%
+  group_by(condition, method) %>%
+  summarise(
+    mean_ari = mean(ari),
+    sd_ari = sd(ari),
+    ci_lower = mean_ari - 1.96 * sd_ari/sqrt(n()),
+    ci_upper = mean_ari + 1.96 * sd_ari/sqrt(n())
+  )
+
+# Create violin plot
+p1 <- ggplot(results, aes(x = method, y = ari, fill = method)) +
+  geom_violin(trim = FALSE) +
+  geom_boxplot(width = 0.1, fill = "white", alpha = 0.5) +
+  facet_wrap(~condition, scales = "free") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom"
+  ) +
+  labs(
+    title = "Distribution of ARI Scores by Method and Condition",
+    x = "Clustering Method",
+    y = "Adjusted Rand Index"
+  )
+
+# Create bar plot with error bars
+p2 <- ggplot(summary_stats, aes(x = method, y = mean_ari, fill = method)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper),
+                width = 0.2, position = position_dodge(0.9)) +
+  facet_wrap(~condition, scales = "free") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom"
+  ) +
+  labs(
+    title = "Mean ARI Scores with 95% Confidence Intervals",
+    x = "Clustering Method",
+    y = "Mean Adjusted Rand Index"
+  )
+
+# Print plots
+print(p1)
+print(p2)
+
+# Print summary statistics
+print(summary_stats)
+```
+
+```{r}
+p_combined <- ggplot(results, aes(x = method, y = ari, fill = method)) +
+  geom_violin(trim = FALSE) +
+  geom_boxplot(width = 0.1, fill = "white", alpha = 0.5) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none",
+    plot.title = element_text(hjust = 0.5, size = 14),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10)
+  ) +
+  labs(
+    title = "Distribution of ARI Scores Across All Conditions",
+    x = "Clustering Method",
+    y = "Adjusted Rand Index"
+  )
+
+# Calculate and print overall summary statistics
+overall_summary <- results %>%
+  group_by(method) %>%
+  summarise(
+    mean_ari = mean(ari),
+    sd_ari = sd(ari),
+    median_ari = median(ari),
+    q1_ari = quantile(ari, 0.25),
+    q3_ari = quantile(ari, 0.75)
+  ) %>%
+  arrange(desc(mean_ari))
+
+# Print plot and summary
+print(p_combined)
+print(overall_summary)
+```
+
+```{r}
+library(Rtsne)
+create_tsne_plot <- function(X, labels, title) {
+  # Compute t-SNE embedding
+  tsne_result <- Rtsne(X, perplexity = 30, verbose = FALSE)
+  
+  # Create plot data
+  plot_data <- data.frame(
+    x = tsne_result$Y[,1],
+    y = tsne_result$Y[,2],
+    label = factor(labels)
+  )
+  
+  # Create plot
+  ggplot(plot_data, aes(x = x, y = y, color = label)) +
+    geom_point(alpha = 0.6, size = 1) +
+    labs(title = title,
+         x = "t-SNE 1",
+         y = "t-SNE 2",
+         color = "Component") +
+    theme_minimal() +
+    scale_color_discrete(name = "Component")
+}
+
+```
+
+```{r}
+# Generate different datasets
+# 1. Default case: K=5, all ranks 5, no noise
+default_data <- generate_low_rank_mixture(
+  n = n_samples,
+  ambient_dim = ambient_dim,
+  K = 5,
+  ranks = rep(5, 5),
+  mixing_props = rep(1/5, 5),
+  noise_sd = 0
+)
+
+# 2. Higher number of components: K=10
+many_comp_data <- generate_low_rank_mixture(
+  n = n_samples,
+  ambient_dim = ambient_dim,
+  K = 10,
+  ranks = rep(5, 10),
+  mixing_props = rep(1/10, 10),
+  noise_sd = 0
+)
+
+# 3. Mixed ranks: K=5, ranks varying
+mixed_ranks_data <- generate_low_rank_mixture(
+  n = n_samples,
+  ambient_dim = ambient_dim,
+  K = 5,
+  ranks = c(5, 5, 10, 15, 20),
+  mixing_props = rep(1/5, 5),
+  noise_sd = 0
+)
+
+# 4. With noise: K=5, all ranks 5, noise=0.3
+noisy_data <- generate_low_rank_mixture(
+  n = n_samples,
+  ambient_dim = ambient_dim,
+  K = 5,
+  ranks = rep(5, 5),
+  mixing_props = rep(1/5, 5),
+  noise_sd = 0.3
+)
+
+# Create plots
+p1 <- create_tsne_plot(default_data$X, default_data$labels, 
+                      "Default Case: 5 Components, Rank 5, No Noise")
+
+p2 <- create_tsne_plot(many_comp_data$X, many_comp_data$labels,
+                      "10 Components, Rank 5, No Noise")
+
+p3 <- create_tsne_plot(mixed_ranks_data$X, mixed_ranks_data$labels,
+                      "5 Components, Mixed Ranks (5-20), No Noise")
+
+p4 <- create_tsne_plot(noisy_data$X, noisy_data$labels,
+                      "5 Components, Rank 5, Noise SD=0.3")
+
+
+```
+
+```{r}
+print(p4)
+```
